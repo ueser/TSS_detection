@@ -1,0 +1,16 @@
+This project aims to detect the transcription initiation events in non-conventional genomic regions, such as intragenic transcription. 
+
+Steps:
+1. Take the canonical annotation, filter the genes shorter than 500bp
+2. Extract the signal for each gene from 200bp upstream of TSS to TTS
+3. Smooth the signal with a kernal smoothing, 50bp window
+4. Detect all peaks
+5. Get a background null model from the signal for all genes
+6. Calculate the 95% of the background distribution and take that as the threshold for the gene of interest
+7. Record the thresholded peaks for each gene with their positions and the values 
+
+
+TODOs:
+1. TFs table with their scores and the signal of the intragenic transcription
+
+
