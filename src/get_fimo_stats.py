@@ -115,7 +115,7 @@ def main():
 
         fig = pl.figure()
         pl.bar(np.arange(len(pValsTmp)),-np.log10(pValsTmp['pVal_asenUpsvsDws_'+direction]),0.8,color='#d9544d',label = direction +' Strand')
-        pl.xticks(np.arange(len(pValsTmp))+.4, pValsTmp.index.values,rotation='vertical')
+        pl.xticks(np.arange(len(pValsTmp))+.4, pValsTmp.index.values, rotation='vertical')
         pl.ylabel('Log10 p-value')
         pl.legend()
         pl.savefig(options.save_path+'Figures/intragenic_asense_EnrichedTFs_'+direction+'Strand.pdf')

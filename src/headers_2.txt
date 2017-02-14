@@ -1,0 +1,1 @@
+chr TFbs_start  TFbs_end  TFbs_strand TF  p-value q-value score inter_intra chr_2 start end strand  gene  peak_value  fold_change

@@ -43,16 +43,17 @@ def reverse_complement(seq):
     return "".join(complement.get(base, base) for base in reversed(seq))
 
 
-def get_peaks(vecs, offset):
+def get_peaks(vecs, offset, ups):
 
     filter_fun = np.vectorize(lambda pk: np.float(np.sum(vecs > vecs[pk])) / len(vecs))
     # detect all peaks in vecs
     peaks = dp.detect_peaks(vecs, mpd=25, show=False)
     if peaks.shape[0] == 0:
-        return []
+        return [], []
     else:
         try:
-            return peaks[(filter_fun(peaks) < options.p_val_threshold) & (peaks > offset)]
+            return peaks[(filter_fun(peaks) < options.p_val_threshold) & (peaks > (ups+offset))], \
+                   peaks[(filter_fun(peaks) < options.p_val_threshold) & (peaks < (ups+25))]
         except IndexError:
             print(peaks.shape, vecs.shape)
             raise
@@ -79,21 +80,48 @@ def detect_peaks_save_seq(debug_idx=0):
         WT_track_B = '81B'
         condition_track_A = '80A'
         condition_track_B = '80B'
+
     elif options.runName == 'diamide':
         WT_track_A = 'YPDA'
         WT_track_B = 'YPDB'
         condition_track_A = 'DiaA'
         condition_track_B = 'DiaB'
+
     elif options.runName == 'diamide_control':
         WT_track_A = 'YPDA'
         WT_track_B = 'YPDB'
         condition_track_A = 'YPDA'
         condition_track_B = 'YPDB'
+
     elif options.runName == 'spt6_control':
         WT_track_A = '81A'
         WT_track_B = '81B'
         condition_track_A = '81A'
         condition_track_B = '81B'
+
+    elif options.runName == 'diamide_chipnexus':
+        WT_track_A = 'ChIPnexus_DiamControl'
+        WT_track_B = 'ChIPnexus_DiamControl'
+        condition_track_A = 'ChIPnexus_Dia'
+        condition_track_B = 'ChIPnexus_Dia'
+
+    elif options.runName == 'nitrogen_chipnexus':
+        WT_track_A = 'ChIPnexus_stressControl'
+        WT_track_B = 'ChIPnexus_stressControl'
+        condition_track_A = 'ChIPnexus_Nit'
+        condition_track_B = 'ChIPnexus_Nit'
+
+    elif options.runName == 'spt6_chipnexus':
+        WT_track_A = 'ChIPnexus_spt6Control'
+        WT_track_B = 'ChIPnexus_spt6Control'
+        condition_track_A = 'ChIPnexus_spt6'
+        condition_track_B = 'ChIPnexus_spt6'
+
+    elif options.runName == 'aminoacid_chipnexus':
+        WT_track_A = 'ChIPnexus_stressControl'
+        WT_track_B = 'ChIPnexus_stressControl'
+        condition_track_A = 'ChIPnexus_AA'
+        condition_track_B = 'ChIPnexus_AA'
 
     # Store the pointers into a dictionary
     pntr_dict = {WT_track_A: [gdb.open_track(WT_track_A+'_pos'), gdb.open_track(WT_track_A+'_neg'), 'WT_A'],
@@ -120,8 +148,10 @@ def detect_peaks_save_seq(debug_idx=0):
                        'relative_position': buffSize,
                        'strand': buffSize,
                        'fold_change': buffSize,
+                       'peak_value': buffSize,
                        'gene': buffSize,
-                       'orientation': buffSize},
+                       'orientation': buffSize,
+                       'type': buffSize},
                       index=np.arange(annot.shape[0]*10))
 
     # loop over the genes in annotation data frame
@@ -146,24 +176,50 @@ def detect_peaks_save_seq(debug_idx=0):
                 vec[pntr_key] = np.flipud(sm.smooth(tsN, smooth_param)[(smooth_param-1):-(smooth_param-1)])
                 vecAS[pntr_key] = np.flipud(sm.smooth(tsP, smooth_param)[(smooth_param-1):-(smooth_param-1)])
 
+
         ### FOR SENSE DIRECTION ###
         # add up the replicates
         vecs = vec[condition_track_A]+vec[condition_track_B]
         # get the peaks located <offset> downstream of TSS
-        peaks = get_peaks(vecs,  offset+ups)
+        peaks, tss = get_peaks(vecs,  offset, ups)
+        if len(tss) > 0:
+            xv = vec[WT_track_A][tss] + vec[WT_track_A][tss]
+            xv_s6 = vecs[tss]
+            ratios = (xv_s6 + 1e-5) / (xv + 1e-5)
+            df.loc[tt:(tt + len(tss) - 1), 'chr'] = [chname] * len(tss)
+            df.loc[tt:(tt + len(tss) - 1),
+            'peak_position'] = tss + start - ups if strand == '+' else -tss + end + ups
+            df.loc[tt:(tt + len(tss) - 1), 'relative_position'] = tss - ups
+            df.loc[tt:(tt + len(tss) - 1), 'strand'] = [strand] * len(tss)
+            df.loc[tt:(tt + len(tss) - 1), 'fold_change'] = ratios
+            df.loc[tt:(tt + len(tss) - 1), 'peak_value'] = xv_s6
+            df.loc[tt:(tt + len(tss) - 1), 'gene'] = [gene] * len(tss)
+            df.loc[tt:(tt + len(tss) - 1), 'orientation'] = ['sense'] * len(tss)
+            df.loc[tt:(tt + len(tss) - 1), 'type'] = ['native'] * len(tss)
+            # for each peak position, record the DNA sequence of pseudo-promoter (>200bp upstream) to the txt files
+            for ww in range(len(tss)):
+                ps = tss[ww] + start - ups - 150 if strand == '+' else -tss[ww] + end + ups - 50
+                seqVec = seq.get_seq_str(chname, ps + 1, ps + 200)
+                if strand == '-':
+                    seqVec = reverse_complement(seqVec)
+                f_sense_seq.write('>' + gene + '_pk:' + str(tt + ww) + '\n')
+                f_sense_seq.write(seqVec + '\n')
+            tt += len(tss)
+            
         # if there are some peaks, record the peak attributes
         if len(peaks) > 0:
             xv = vec[WT_track_A][peaks]+vec[WT_track_A][peaks]
             xv_s6 = vecs[peaks]
-            ratios = xv_s6/xv
+            ratios = (xv_s6+1e-5)/(xv+1e-5)
             df.loc[tt:(tt+len(peaks)-1), 'chr'] = [chname]*len(peaks)
             df.loc[tt:(tt+len(peaks)-1), 'peak_position'] = peaks+start-ups if strand == '+' else -peaks+end+ups
             df.loc[tt:(tt+len(peaks)-1), 'relative_position'] = peaks-ups
             df.loc[tt:(tt+len(peaks)-1), 'strand']= [strand]*len(peaks)
             df.loc[tt:(tt+len(peaks)-1), 'fold_change'] = ratios
+            df.loc[tt:(tt+len(peaks)-1), 'peak_value'] = xv_s6
             df.loc[tt:(tt+len(peaks)-1), 'gene'] = [gene]*len(peaks)
             df.loc[tt:(tt+len(peaks)-1), 'orientation'] = ['sense']*len(peaks)
-
+            df.loc[tt:(tt + len(peaks) - 1), 'type'] = ['intragenic']*len(peaks)
             # for each peak position, record the DNA sequence of pseudo-promoter (>200bp upstream) to the txt files
             for ww in range(len(peaks)):
                 ps = peaks[ww]+start-ups-150 if strand == '+' else -peaks[ww]+end+ups-50
@@ -176,19 +232,21 @@ def detect_peaks_save_seq(debug_idx=0):
 
         ### FOR ANTISENSE DIRECTION ###
         vecs = vecAS[condition_track_A]+vecAS[condition_track_B]
-        peaks = get_peaks(vecs, offset+ups)
+        peaks, _ = get_peaks(vecs, offset, ups)
 
         if len(peaks) > 0:
             xv = vecAS[WT_track_A][peaks]+vecAS[WT_track_A][peaks]
             xv_s6 = vecs[peaks]
-            ratios = xv_s6/xv
+            ratios = (xv_s6+1e-5)/(xv+1e-5)
             df.loc[tt:(tt+len(peaks)-1), 'chr'] = [chname]*len(peaks)
             df.loc[tt:(tt+len(peaks)-1), 'peak_position'] = peaks+start-ups if strand == '+' else -peaks+end+ups
             df.loc[tt:(tt+len(peaks)-1), 'relative_position'] = peaks-ups
             df.loc[tt:(tt+len(peaks)-1), 'strand'] = ['+']*len(peaks) if strand == '-' else ['-']*len(peaks)
             df.loc[tt:(tt+len(peaks)-1), 'fold_change'] = ratios
+            df.loc[tt:(tt+len(peaks)-1), 'peak_value'] = xv_s6
             df.loc[tt:(tt+len(peaks)-1), 'gene'] = [gene]*len(peaks)
             df.loc[tt:(tt+len(peaks)-1), 'orientation'] = ['antisense']*len(peaks)
+            df.loc[tt:(tt + len(peaks) - 1), 'type'] = ['intragenic']*len(peaks)
             for ww in range(len(peaks)):
                 ps = peaks[ww]+start-ups-50 if strand=='+' else -peaks[ww]+end+ups-150
                 seqVec = seq.get_seq_str(chname, ps+1, ps+200)
